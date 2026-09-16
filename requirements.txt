@@ -1,3 +1,5 @@
 opencv-python==4.10.0.84
 numpy==1.26.4
-# insightface==0.7.3  # Require Microsoft C++ Build Tools on Windows; enable in Stage 3+ when face recognition is added
+# insightface==0.7.3  # Installed as insightface-2.0 via wheel
+streamlit==1.43.0
+pandas==2.2.3

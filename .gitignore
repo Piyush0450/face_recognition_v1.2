@@ -1,5 +1,6 @@
-# Virtual Environment
+# Virtual Environments
 venv/
+.venv/
 env/
 ENV/
 
@@ -12,14 +13,28 @@ __pycache__/
 # Large binaries, models & generated data
 models/*
 !models/.gitkeep
-data/embeddings.pkl
+*.onnx
+*.pth
 data/faces/*
 !data/faces/.gitkeep
+data/embeddings.pkl
 database/*.db
+database/*.sqlite
+database/*.sqlite3
 !database/.gitkeep
+
+# Runtime Logs
+logs/
+*.log
+
+# Environment & Secret files
+.env
+.env.local
+.streamlit/secrets.toml
 
 # IDE and OS files
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
 *.swp
