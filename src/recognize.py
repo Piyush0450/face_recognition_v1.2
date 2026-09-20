@@ -11,10 +11,14 @@ import os
 import pickle
 import sys
 import time
+import warnings
 import cv2
 import numpy as np
 import onnxruntime as ort
 from insightface.app import FaceAnalysis
+
+# Suppress deprecation warnings from scikit-image inside InsightFace
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Add project root to sys.path to import config.py
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

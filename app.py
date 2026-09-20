@@ -15,12 +15,16 @@ import shutil
 import subprocess
 import sys
 import time
+import warnings
 import cv2
 import numpy as np
 import onnxruntime as ort
 import pandas as pd
 import streamlit as st
 from insightface.app import FaceAnalysis
+
+# Suppress deprecation warnings from scikit-image inside InsightFace
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # Add project root to sys.path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -241,94 +245,85 @@ with tab1:
 # =============================================================================
 with tab2:
     st.header("Register New Person")
-    st.caption("Capture 20 face images using the webcam, then rebuild face embeddings.")
+    st.caption("Capture 20 face images using the webcam. Embeddings and database update execute automatically.")
 
-    col1, col2 = st.columns([2, 1])
+    new_name = st.text_input("Person's Name", placeholder="e.g. John Doe").strip()
 
-    with col1:
-        new_name = st.text_input("Person's Name", placeholder="e.g. John Doe").strip()
+    if st.button("📷 Capture 20 Images", type="primary"):
+        clean_name = sanitize_name(new_name)
 
-        if st.button("📷 Capture 20 Images", type="primary"):
-            clean_name = sanitize_name(new_name)
+        if not clean_name:
+            st.warning("Please enter a valid person name.")
+        else:
+            person_dir = os.path.join(PROJECT_ROOT, "data", "faces", clean_name)
+            os.makedirs(person_dir, exist_ok=True)
 
-            if not clean_name:
-                st.warning("Please enter a valid person name.")
+            cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+            face_cascade = cv2.CascadeClassifier(cascade_path)
+
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                st.error("Unable to open webcam.")
             else:
-                person_dir = os.path.join(PROJECT_ROOT, "data", "faces", clean_name)
-                os.makedirs(person_dir, exist_ok=True)
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                cap_image_holder = st.empty()
 
-                cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
-                face_cascade = cv2.CascadeClassifier(cascade_path)
+                captured = 0
+                last_cap_time = 0.0
+                target = 20
 
-                cap = cv2.VideoCapture(0)
-                if not cap.isOpened():
-                    st.error("Unable to open webcam.")
-                else:
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    cap_image_holder = st.empty()
+                try:
+                    while captured < target:
+                        ret, frame = cap.read()
+                        if not ret or frame is None:
+                            break
 
-                    captured = 0
-                    last_cap_time = 0.0
-                    target = 20
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
 
-                    try:
-                        while captured < target:
-                            ret, frame = cap.read()
-                            if not ret or frame is None:
-                                break
+                        if len(faces) == 1:
+                            (x, y, w, h) = faces[0]
+                            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
+                            curr = time.time()
+                            if curr - last_cap_time >= 0.2:
+                                captured += 1
+                                last_cap_time = curr
 
-                            if len(faces) == 1:
-                                (x, y, w, h) = faces[0]
-                                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                                margin_x = int(w * 0.50)
+                                margin_y = int(h * 0.50)
+                                h_frame, w_frame, _ = frame.shape
 
-                                curr = time.time()
-                                if curr - last_cap_time >= 0.2:
-                                    captured += 1
-                                    last_cap_time = curr
+                                x1 = max(0, x - margin_x)
+                                y1 = max(0, y - margin_y)
+                                x2 = min(w_frame, x + w + margin_x)
+                                y2 = min(h_frame, y + h + margin_y)
 
-                                    margin_x = int(w * 0.15)
-                                    margin_y = int(h * 0.15)
-                                    h_frame, w_frame, _ = frame.shape
+                                face_crop = frame[y1:y2, x1:x2]
+                                img_path = os.path.join(PROJECT_ROOT, "data", "faces", clean_name, f"{captured}.jpg")
+                                cv2.imwrite(img_path, face_crop)
 
-                                    x1 = max(0, x - margin_x)
-                                    y1 = max(0, y - margin_y)
-                                    x2 = min(w_frame, x + w + margin_x)
-                                    y2 = min(h_frame, y + h + margin_y)
+                                progress_bar.progress(captured / target)
+                                status_text.info(f"Captured {captured}/{target} face images for **{clean_name}**.")
 
-                                    face_crop = frame[y1:y2, x1:x2]
-                                    img_path = os.path.join(person_dir, f"{captured}.jpg")
-                                    cv2.imwrite(img_path, face_crop)
+                        cap_image_holder.image(frame, channels="BGR", use_container_width=True)
 
-                                    progress_bar.progress(captured / target)
-                                    status_text.info(f"Captured {captured}/{target} face images for **{clean_name}**.")
+                    if captured >= target:
+                        st.success(f"Successfully captured 20 face images for **{clean_name}**!")
+                        with st.spinner("🤖 Automatically generating embeddings & updating database..."):
+                            res1 = subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, "src", "encode_faces.py")], capture_output=True, text=True)
+                            res2 = subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, "src", "migrate_to_db.py")], capture_output=True, text=True)
 
-                            cap_image_holder.image(frame, channels="BGR", use_container_width=True)
-
-                        if captured >= target:
-                            st.success(f"Successfully captured 20 face images for **{clean_name}**!")
-                    finally:
-                        cap.release()
-
-    with col2:
-        st.subheader("Embedding Operations")
-        st.caption("After capturing images, generate embeddings and update SQLite database.")
-
-        if st.button("🔄 Rebuild Embeddings", use_container_width=True):
-            with st.spinner("Generating embeddings & updating SQLite database..."):
-                res1 = subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, "src", "encode_faces.py")], capture_output=True, text=True)
-                res2 = subprocess.run([sys.executable, os.path.join(PROJECT_ROOT, "src", "migrate_to_db.py")], capture_output=True, text=True)
-
-                if res1.returncode == 0 and res2.returncode == 0:
-                    st.cache_data.clear()
-                    st.success("Embeddings rebuilt and SQLite database updated successfully!")
-                    st.text(res1.stdout)
-                else:
-                    st.error("Error rebuilding embeddings.")
-                    st.code(res1.stderr + "\n" + res2.stderr)
+                            if res1.returncode == 0 and res2.returncode == 0:
+                                st.cache_data.clear()
+                                st.cache_resource.clear()
+                                st.success(f"✨ Face registered, embeddings generated, and database synced automatically for **{clean_name}**!")
+                            else:
+                                st.error("Error during automatic embedding generation.")
+                                st.code(res1.stderr + "\n" + res2.stderr)
+                finally:
+                    cap.release()
 
 
 # =============================================================================

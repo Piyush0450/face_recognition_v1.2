@@ -10,10 +10,14 @@ import argparse
 import os
 import pickle
 import sys
+import warnings
 import cv2
 import numpy as np
 import onnxruntime as ort
 from insightface.app import FaceAnalysis
+
+# Suppress deprecation warnings from scikit-image inside InsightFace
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def get_execution_context() -> tuple[int, str]:
@@ -110,12 +114,26 @@ def main() -> None:
             # Detect faces using InsightFace
             detected_faces = app.get(img)
 
-            # Skip if zero or more than one face is detected in the crop
-            if len(detected_faces) != 1:
+            # If no faces detected on raw crop, try adding padding to assist detector
+            if len(detected_faces) == 0:
+                h_img, w_img = img.shape[:2]
+                padded_img = cv2.copyMakeBorder(
+                    img, h_img // 2, h_img // 2, w_img // 2, w_img // 2,
+                    cv2.BORDER_CONSTANT, value=[0, 0, 0]
+                )
+                detected_faces = app.get(padded_img)
+
+            if len(detected_faces) == 0:
                 continue
 
+            # If multiple faces detected, pick the largest face (primary subject)
+            target_face = max(
+                detected_faces,
+                key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])
+            )
+
             # Extract the 512-dimensional embedding vector
-            raw_embedding = detected_faces[0].embedding
+            raw_embedding = target_face.embedding
 
             # L2-normalize the individual embedding
             normalized_embedding = l2_normalize(raw_embedding)

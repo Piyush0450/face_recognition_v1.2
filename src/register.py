@@ -8,6 +8,7 @@ margin, and captures 20 face images to disk.
 
 import os
 import re
+import subprocess
 import sys
 import time
 import cv2
@@ -106,9 +107,9 @@ def main() -> None:
                     captured_count += 1
                     last_capture_time = current_time
 
-                    # 5. Crop the face region with 15% margin around bounding box
-                    margin_x = int(w * 0.15)
-                    margin_y = int(h * 0.15)
+                    # 5. Crop the face region with 50% margin around bounding box to provide full facial context for InsightFace
+                    margin_x = int(w * 0.50)
+                    margin_y = int(h * 0.50)
 
                     x1 = max(0, x - margin_x)
                     y1 = max(0, y - margin_y)
@@ -178,6 +179,23 @@ def main() -> None:
         cap.release()
         cv2.destroyAllWindows()
         print("Camera released and windows closed cleanly.")
+
+    # Automatically trigger embedding generation & DB migration upon successful capture
+    if captured_count >= target_count:
+        print("\n--- AUTOMATIC EMBEDDING & DATABASE UPDATE ---")
+        python_exe = sys.executable
+        encode_script = os.path.join(project_root, "src", "encode_faces.py")
+        migrate_script = os.path.join(project_root, "src", "migrate_to_db.py")
+
+        res1 = subprocess.run([python_exe, encode_script])
+        if res1.returncode == 0:
+            res2 = subprocess.run([python_exe, migrate_script])
+            if res2.returncode == 0:
+                print(f"\n[SUCCESS] Registration, embedding generation, and database sync complete for '{person_name}'!")
+            else:
+                print("\n[ERROR] Failed during database migration.")
+        else:
+            print("\n[ERROR] Failed during face embedding extraction.")
 
 
 if __name__ == "__main__":
